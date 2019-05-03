@@ -423,11 +423,36 @@ class Space extends Array {
         }
         this._inLayout = false;
 
+
+        let oldWidth = this.cloneContainer.width;
+        let auto = true;
+        if (this.targetX + oldWidth < workArea.width
+            || this.targetX > 0
+           ) {
+            auto = false;
+        }
+
         // transforms break on width 1
         let width = Math.max(1, x - gap);
         this.cloneContainer.width = width;
-        if (width < workArea.width) {
-            this.targetX = workArea.x - this.monitor.x + Math.round((workArea.width - width)/2);
+
+        if (auto) {
+            let removeLastFrames = [];
+            let first = this[0] || [];
+            let last = this[this.length -1] || [];
+            if (width < workArea.width) {
+                this.targetX = workArea.x - this.monitor.x + Math.round((workArea.width - width)/2);
+                removeLastFrames = first.concat(last);
+            } else if (width + this.targetX < workArea.width) {
+                this.targetX = workArea.width - width;
+                removeLastFrames = last;
+            } else if (this.targetX > 0 ) {
+                this.targetX = workArea.x;
+                removeLastFrames = first;
+            }
+            // Invalidate the last position stored on the relevant edge windows
+            for (let w of removeLastFrames)
+                w.lastFrame = undefined;
         }
         if (animate) {
             Tweener.addTween(this.cloneContainer,
@@ -537,6 +562,13 @@ class Space extends Array {
         metaWindow.clone.reparent(this.cloneContainer);
 
         this._populated && this.layout();
+        // Center the first window
+        if (this.length === 1) {
+            let workArea = Main.layoutManager.getWorkAreaForMonitor(this.monitor.index);
+            this.targetX = workArea.x - this.monitor.x + Math.round((workArea.width)/2);
+            this.cloneContainer.x = this.targetX;
+            centerWindowHorizontally(this.selectedWindow);
+        }
         this.emit('window-added', metaWindow, index, row);
         return true;
     }
