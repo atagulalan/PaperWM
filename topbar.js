@@ -21,6 +21,7 @@ var Tweener = Extension.imports.utils.tweener;
 
 var Tiling = Extension.imports.tiling;
 var Navigator = Extension.imports.navigator;
+var Settings = Extension.imports.settings;
 var Utils = Extension.imports.utils;
 
 var prefs = Extension.imports.settings.prefs;
@@ -175,12 +176,19 @@ class WorkspaceMenu extends PanelMenu.Button {
             Tiling.spaces.selectedSpace.settings.set_boolean('show-top-bar', item.state);
         });
 
-        this.prefsIcon = new St.Button({ reactive: true,
-                                         can_focus: true,
-                                         track_hover: true,
-                                         accessible_name: 'workspace preference',
-                                         style_class: 'system-menu-action' });
-        this.prefsIcon.child = new St.Icon({ icon_name: 'gtk-preferences' });
+        function createButton(icon_name, accessible_name) {
+            return new St.Button({reactive: true,
+                                  can_focus: true,
+                                  track_hover: true,
+                                  accessible_name,
+                                  style_class: 'system-menu-action',
+                                  child: new St.Icon({icon_name})
+            });
+        }
+
+        this.prefsIcon = createButton('gtk-preferences', 'workspace preference');
+        this.prevIcon = createButton('go-previous-symbolic', 'previous workspace setting');
+        this.nextIcon = createButton('go-next-symbolic', 'next workspace setting');
 
         this.prefsIcon.connect('clicked', () => {
             this.menu.close(true);
@@ -194,7 +202,67 @@ class WorkspaceMenu extends PanelMenu.Button {
             }
         });
 
-        this.menu.box.add(this.prefsIcon, { expand: true, x_fill: false });
+        function rotated(list, dir=1) {
+            return [].concat(
+                list.slice(dir),
+                list.slice(0, dir)
+            );
+        }
+
+        let cycle = (dir=1) => {
+            let n = global.workspace_manager.get_n_workspaces();
+            let N = Settings.workspaceList.get_strv('list').length;
+            let space = Tiling.spaces.selectedSpace;
+            let wsI = space.workspace.index();
+
+            // 2 6 7 8   <-- indices
+            // x a b c   <-- settings
+            // a b c x   <-- rotated settings
+
+            let uuids = Settings.workspaceList.get_strv('list');
+            // Work on tuples of [uuid, settings] since we need to uuid association
+            // in the last step
+            let settings = uuids.map(
+                uuid => [uuid, Settings.getWorkspaceSettingsByUUID(uuid)]
+            );
+            settings.sort((a, b) => a[1].get_int('index') - b[1].get_int('index'));
+
+            let unbound = settings.slice(n);
+            let strip = [settings[wsI]].concat(unbound);
+
+            strip = rotated(strip, dir);
+
+            let nextSettings = strip[0];
+            unbound = strip.slice(1);
+
+            nextSettings[1].set_int('index', wsI);
+            space.setSettings(nextSettings); // ASSUMPTION: ok that two settings have same index here
+
+            // Re-assign unbound indices:
+            for (let i = n; i < N; i++) {
+                unbound[i-n][1].set_int('index', i);
+            }
+            updateWorkspaceIndicator();
+            this.entry.label.text = space.name;
+        }
+
+        this.nextIcon.connect('clicked', () => {
+            log('cycle next')
+            cycle(-1);
+        });
+        this.prevIcon.connect('clicked', () => {
+            log('cycle prev')
+            cycle(1);
+        });
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        this.iconBox = new St.BoxLayout();
+        this.menu.box.add(this.iconBox);
+
+        this.iconBox.add(this.prevIcon, { expand: true, x_fill: false });
+        this.iconBox.add(this.prefsIcon, { expand: true, x_fill: false });
+        this.iconBox.add(this.nextIcon, { expand: true, x_fill: false });
 
         // this.entry.actor.width = this.colors.actor.width;
         // this.colors.entry.actor.width = this.colors.actor.width;
