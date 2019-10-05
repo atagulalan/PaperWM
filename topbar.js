@@ -251,10 +251,12 @@ class WorkspaceMenu extends PanelMenu.Button {
         this.nextIcon.connect('clicked', () => {
             log('cycle next')
             cycle(-1);
+            menu.nextIcon.grab_key_focus();
         });
         this.prevIcon.connect('clicked', () => {
             log('cycle prev')
             cycle(1);
+            menu.prevIcon.grab_key_focus();
         });
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
