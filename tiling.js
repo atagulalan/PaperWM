@@ -264,6 +264,7 @@ class Space extends Array {
         const settings = Convenience.getSettings();
         this.signals.connect(settings, 'changed::default-background',
                              this.updateBackground.bind(this));
+        this.updateShowTopBar();
     }
 
     layoutGrabColumn(column, x, y0, targetWidth, availableHeight, time, grabWindow) {
@@ -897,20 +898,8 @@ class Space extends Array {
     }
 
     updateShowTopBar() {
-        let showTopBar = prefs.default_show_top_bar;
-        let userValue = this.settings.get_user_value('show-top-bar');
-        if (userValue) {
-            showTopBar = userValue.unpack();
-        }
-
-        if (showTopBar) {
-            this.showTopBar = 1;
-            this._populated && TopBar.show();
-        } else {
-            this.showTopBar = 0;
-            this._populated && TopBar.hide();
-        }
-
+        this.showTopBar = 0;
+        this._populated && TopBar.hide();
         this.layout();
     }
 
@@ -931,7 +920,9 @@ box-shadow: 0px 0px 8px 0px rgba(0, 0, 0, .7);
     }
 
     updateBackground() {
-        let path = this.settings.get_string('background') || prefs.default_background;
+        let desktopBackground = new Gio.Settings({schema_id: 'org.gnome.desktop.background'})
+        .get_string('picture-uri').replace(/^(file\:\/\/)/,"")
+        let path = desktopBackground || this.settings.get_string('background') || prefs.default_background;
         let file = Gio.File.new_for_path(path);
         const BackgroundStyle = imports.gi.GDesktopEnums.BackgroundStyle;
         let style = BackgroundStyle.ZOOM;
