@@ -68,8 +68,9 @@ function createAppIcon(metaWindow, size) {
 /**
  */
 class ClickOverlay {
-    constructor(monitor) {
+    constructor(monitor, onlyOnPrimary) {
         this.monitor = monitor;
+        this.onlyOnPrimary = onlyOnPrimary;
         this.left = new StackOverlay(Meta.MotionDirection.LEFT, monitor);
         this.right = new StackOverlay(Meta.MotionDirection.RIGHT, monitor);
 
@@ -86,6 +87,9 @@ class ClickOverlay {
         this.signals.connect(
             enterMonitor, 'motion-event',
             (actor, event) => {
+                // Changing monitors while in workspace preview doesn't work
+                if (Tiling.inPreview)
+                    return;
                 let [x, y, z] = global.get_pointer();
                 let [lX, lY] = this._lastPointer;
                 this._lastPointer = [x, y];
@@ -127,10 +131,11 @@ class ClickOverlay {
     }
 
     activate() {
+        if (this.onlyOnPrimary)
+            return;
         let monitor = this.monitor;
-        let d = 10;
-        this.enterMonitor.set_position(monitor.x + d, monitor.y + d);
-        this.enterMonitor.set_size(monitor.width - 2*d, monitor.height - 2*d);
+        this.enterMonitor.set_position(monitor.x, monitor.y);
+        this.enterMonitor.set_size(monitor.width, monitor.height);
     }
 
     deactivate() {
@@ -211,12 +216,14 @@ var StackOverlay = class StackOverlay {
         Main.layoutManager.trackChrome(overlay);
 
         this.overlay = overlay;
+        this.setTarget(null);
     }
 
     triggerPreview() {
         if ("_previewId" in this)
             return;
         this._previewId = Mainloop.timeout_add(100, () => {
+            delete this._previewId;
             if (this.clone) {
                 this.clone.destroy();
                 this.clone = null;
@@ -240,12 +247,18 @@ var StackOverlay = class StackOverlay {
                 x = monitor.x;
             clone.set_position(x, y);
         });
+
+        this._removeId = Mainloop.timeout_add_seconds(2, this.removePreview.bind(this));
     }
 
     removePreview() {
         if ("_previewId" in this) {
             Mainloop.source_remove(this._previewId);
             delete this._previewId;
+        }
+        if ("_removeId" in this) {
+            Mainloop.source_remove(this._removeId);
+            delete this._removeId;
         }
 
         if (!this.clone)

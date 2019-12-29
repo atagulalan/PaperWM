@@ -115,55 +115,13 @@ function cycleWorkspaceSettings(binding = "<Super>q") {
     var Settings = Extension.imports.settings;
     var Utils = Extension.imports.utils;
 
-    function rotated(list, dir=1) {
-        return [].concat(
-            list.slice(dir),
-            list.slice(0, dir)
-        );
-    }
-
-    function cycle(mw, dir=1) {
-        let n = global.workspace_manager.get_n_workspaces();
-        let N = Settings.workspaceList.get_strv('list').length;
-        let space = Tiling.spaces.selectedSpace;
-        let wsI = space.workspace.index();
-
-        // 2 6 7 8   <-- indices
-        // x a b c   <-- settings
-        // a b c x   <-- rotated settings
-
-        let uuids = Settings.workspaceList.get_strv('list');
-        // Work on tuples of [uuid, settings] since we need to uuid association
-        // in the last step
-        let settings = uuids.map(
-            uuid => [uuid, Settings.getWorkspaceSettingsByUUID(uuid)]
-        );
-        settings.sort((a, b) => a[1].get_int('index') - b[1].get_int('index'));
-
-        let unbound = settings.slice(n);
-        let strip = [settings[wsI]].concat(unbound);
-
-        strip = rotated(strip, dir);
-
-        let nextSettings = strip[0];
-        unbound = strip.slice(1);
-
-        nextSettings[1].set_int('index', wsI);
-        space.setSettings(nextSettings); // ASSUMPTION: ok that two settings have same index here
-
-        // Re-assign unbound indices:
-        for (let i = n; i < N; i++) {
-            unbound[i-n][1].set_int('index', i);
-        }
-    }
-
     Keybindings.bindkey(
         binding, "next-space-setting",
-        mw => cycle(mw, -1), { activeInNavigator: true }
+        mw => Tiling.cycleWorkspaceSettings(-1), { activeInNavigator: true }
     );
     Keybindings.bindkey(
         "<Shift>"+binding, "prev-space-setting",
-        mw => cycle(mw,  1), { activeInNavigator: true }
+        mw => Tiling.cycleWorkspaceSettings(1), { activeInNavigator: true }
     );
 }
 
@@ -180,4 +138,100 @@ function listFreeBindings(modifierString) {
     return [].concat(chars, symbols).filter(
         key => Keybindings.getBoundActionId(modifierString+key) === 0
     ).map(key => modifierString+key)
+}
+
+function moveSpaceToMonitor(basebinding = '<super><alt>') {
+    let Meta = imports.gi.Meta;
+    let display = global.display;
+
+    function moveTo(direction) {
+        let Navigator = Extension.imports.navigator;
+        let spaces = Tiling.spaces;
+
+        let currentSpace = spaces.selectedSpace;
+        let monitor = currentSpace.monitor;
+        let i = display.get_monitor_neighbor_index(monitor.index, direction);
+        let opposite;
+        switch (direction) {
+        case Meta.DisplayDirection.RIGHT:
+            opposite = Meta.DisplayDirection.LEFT; break;
+        case Meta.DisplayDirection.LEFT:
+            opposite = Meta.DisplayDirection.RIGHT; break;
+        case Meta.DisplayDirection.UP:
+            opposite = Meta.DisplayDirection.DOWN; break;
+        case Meta.DisplayDirection.DOWN:
+            opposite = Meta.DisplayDirection.UP; break;
+        }
+        let n = i;
+        if (i === -1) {
+            let i = monitor.index;
+            while (i !== -1) {
+                n = i;
+                i = display.get_monitor_neighbor_index(n, opposite);
+            }
+        }
+        let next = spaces.monitors.get(Main.layoutManager.monitors[n]);
+
+        currentSpace.setMonitor(next.monitor);
+        spaces.monitors.set(next.monitor, currentSpace);
+
+        next.setMonitor(monitor);
+        spaces.monitors.set(monitor, next);
+
+        // This is pretty hacky
+        spaces.switchWorkspace(null, currentSpace.workspace.index(), currentSpace.workspace.index());
+    }
+
+    for (let arrow of ['Down', 'Left', 'Up', 'Right']) {
+        Keybindings.bindkey(`${basebinding}${arrow}`, `move-space-monitor-${arrow}`,
+                            () => {
+                                moveTo(Meta.DisplayDirection[arrow.toUpperCase()]);
+                            });
+    }
+}
+
+/**
+   "<Super>KP_Add" and "<Super>KP_Subtract" to use the numpad keys
+ */
+function adjustWidth(incBinding="<Super>plus", decBinding="<Super>minus", increment=50) {
+    function adjuster(delta) {
+        return mw => {
+            if (!mw) return;
+            const f = mw.get_frame_rect();
+            mw.move_resize_frame(true, f.x, f.y, f.width + delta, f.height);
+        }
+    }
+
+    Keybindings.bindkey(incBinding, "inc-width", adjuster(increment));
+    Keybindings.bindkey(decBinding, "dec-width", adjuster(-increment));
+}
+
+function tileInto(leftBinding="<Super>less", rightBinding="<Super><Shift>less") {
+    // less: '<'
+    let Tiling = Extension.imports.tiling;
+
+    const tileIntoDirection = (dir=-1) => (metaWindow) => {
+        let space = Tiling.spaces.spaceOfWindow(metaWindow);
+        let jFrom = space.indexOf(metaWindow);
+        let jTo = jFrom + dir;
+        if (jTo < 0 || jTo >= space.length)
+            return;
+
+        space[jFrom].splice(space.rowOf(metaWindow), 1);
+        space[jTo].push(metaWindow);
+
+        if (space[jFrom].length === 0) {
+            space.splice(jFrom, 1);
+        }
+        space.layout(true, {
+            customAllocators: { [space.indexOf(metaWindow)]: Tiling.allocateEqualHeight }
+        });
+        space.emit("full-layout");
+    }
+
+    let options = { activeInNavigator: true };
+    if (leftBinding)
+        Keybindings.bindkey(leftBinding, "tile-into-left-column", tileIntoDirection(-1), options);
+    if (rightBinding)
+        Keybindings.bindkey(rightBinding, "tile-into-right-column", tileIntoDirection(1), options);
 }

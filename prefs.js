@@ -96,6 +96,29 @@ class SettingsWidget {
             this._settings.set_int('vertical-margin-bottom', bottomMargin.get_value());
         });
 
+        let vSens = this.builder.get_object('vertical-sensitivity');
+        let hSens = this.builder.get_object('horizontal-sensitivity');
+        let [sx, sy] = this._settings.get_value('swipe-sensitivity').deep_unpack();
+        hSens.set_value(sx);
+        vSens.set_value(sy);
+        let sensChanged = () => {
+            this._settings.set_value('swipe-sensitivity', new GLib.Variant('ad', [hSens.get_value(), vSens.get_value()]));
+        };
+        vSens.connect('value-changed', sensChanged);
+        hSens.connect('value-changed', sensChanged);
+
+
+        let vFric = this.builder.get_object('vertical-friction');
+        let hFric = this.builder.get_object('horizontal-friction');
+        let [fx, fy] = this._settings.get_value('swipe-friction').deep_unpack();
+        hFric.set_value(fx);
+        vFric.set_value(fy);
+        let fricChanged = () => {
+            this._settings.set_value('swipe-friction', new GLib.Variant('ad', [hFric.get_value(), vFric.get_value()]));
+        };
+        vFric.connect('value-changed', fricChanged);
+        hFric.connect('value-changed', fricChanged);
+
         let onlyScratch = this.builder.get_object('only-scratch-in-overview');
         onlyScratch.state =
             this._settings.get_boolean('only-scratch-in-overview');
@@ -115,29 +138,22 @@ class SettingsWidget {
 
         // Workspaces
 
-        const defaultBackground = this.builder.get_object('workspace_chooser_default_background');
-        const deleteDefaultBackground = this.builder.get_object('workspace_button_delete_default_background');
-
-        let filename = this._settings.get_string('default-background');
-        if (filename === ''){
-            defaultBackground.unselect_all();
-            deleteDefaultBackground.sensitive = false;
-        } else {
-            defaultBackground.set_filename(filename);
-            deleteDefaultBackground.sensitive = true;
-        }
-
-        defaultBackground.connect('file-set', () => {
-            let filename = defaultBackground.get_filename();
-            this._settings.set_string('default-background', filename);
-            deleteDefaultBackground.sensitive = true;
+        const defaultBackgroundSwitch = this.builder.get_object('use-default-background');
+        defaultBackgroundSwitch.state =
+            this._settings.get_boolean('use-default-background');
+        defaultBackgroundSwitch.connect('state-set', (obj, state) => {
+            this._settings.set_boolean('use-default-background',
+                                       state);
+        });
+        const backgroundPanelButton = this.builder.get_object('gnome-background-panel');
+        backgroundPanelButton.connect('clicked', () => {
+            GLib.spawn_async(null, ['gnome-control-center', 'background'],
+                             GLib.get_environ(),
+                             GLib.SpawnFlags.SEARCH_PATH | GLib.SpawnFlags.DO_NOT_REAP_CHILD,
+                             null);
         });
 
-        deleteDefaultBackground.connect('clicked', () => {
-            this._settings.set_string('default-background', '');
-            defaultBackground.unselect_all();
-            deleteDefaultBackground.sensitive = false;
-        });
+        let useDefault = this._settings.get_boolean('use-default-background');
 
         const workspaceCombo = this.builder.get_object('workspace_combo_text');
         const workspaceStack = this.builder.get_object('workspace_stack');
@@ -210,12 +226,35 @@ class SettingsWidget {
         workspaceFrame.add(workspaces);
 
         ['previous-workspace', 'previous-workspace-backward',
-         'move-previous-workspace', 'move-previous-workspace-backward' ]
+         'move-previous-workspace', 'move-previous-workspace-backward',
+         'switch-up-workspace', 'switch-down-workspace',
+         'move-up-workspace', 'move-down-workspace'
+        ]
             .forEach(k => {
                 addKeybinding(workspaces.model.child_model, settings, k);
             });
 
         annotateKeybindings(workspaces.model.child_model, settings);
+
+        let monitorFrame = new Gtk.Frame({label: _('Monitors'),
+                                          label_xalign: 0.5});
+        let monitors = createKeybindingWidget(settings, searchEntry);
+        box.add(monitorFrame);
+        monitorFrame.add(monitors);
+
+        ['switch-monitor-right',
+         'switch-monitor-left',
+         'switch-monitor-above',
+         'switch-monitor-below',
+         'move-monitor-right',
+         'move-monitor-left',
+         'move-monitor-above',
+         'move-monitor-below',
+        ].forEach(k => {
+                addKeybinding(monitors.model.child_model, settings, k);
+            });
+
+        annotateKeybindings(monitors.model.child_model, settings);
 
 
         let scratchFrame = new Gtk.Frame({label: _('Scratch layer'),
@@ -232,7 +271,7 @@ class SettingsWidget {
         annotateKeybindings(scratch.model.child_model, settings);
 
         searchEntry.connect('changed', () => {
-            [windows, workspaces, scratch].map(tw => tw.model).forEach(m => m.refilter());
+            [windows, workspaces, monitors, scratch].map(tw => tw.model).forEach(m => m.refilter());
         });
 
 
@@ -244,9 +283,11 @@ class SettingsWidget {
 
     createWorkspacePage(settings, index) {
 
-        let view = new Gtk.Frame();
-        let list = new Gtk.ListBox();
-        view.add(list);
+        let list = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            can_focus: false,
+        });
+        list.add(new Gtk.LevelBar());
 
         let nameEntry = new Gtk.Entry();
         let colorButton = new Gtk.ColorButton();
@@ -257,9 +298,15 @@ class SettingsWidget {
         backgroundBox.add(background)
         backgroundBox.add(clearBackground)
 
+        let directoryChooser = new Gtk.FileChooserButton({
+            action: Gtk.FileChooserAction.SELECT_FOLDER,
+            title: 'Select workspace directory'
+        });
+
         list.add(createRow('Name', nameEntry));
         list.add(createRow('Color', colorButton));
         list.add(createRow('Background', backgroundBox));
+        list.add(createRow('Directory', directoryChooser));
 
         let rgba = new Gdk.RGBA();
         let color = settings.get_string('color');
@@ -313,7 +360,18 @@ class SettingsWidget {
             clearBackground.sensitive = settings.get_string('background') != '';
         });
 
-        return view;
+        let dir = settings.get_string('directory')
+        if (dir === '')
+            directoryChooser.unselect_all();
+        else
+            directoryChooser.set_filename(dir)
+
+        directoryChooser.connect('file-set', () => {
+            let dir = directoryChooser.get_filename();
+            settings.set_string('directory', dir);
+        });
+
+        return list;
     }
 
     getWorkspaceName(settings, index) {
@@ -329,9 +387,9 @@ class SettingsWidget {
 
 function createRow(text, widget, signal, handler) {
     let margin = 12;
-    let row = new Gtk.ListBoxRow({selectable: false});
     let box = new Gtk.Box({
         margin_start: margin, margin_end: margin,
+        margin_top: margin/2, margin_bottom: margin/2,
         orientation: Gtk.Orientation.HORIZONTAL
     });
     let label = new Gtk.Label({
@@ -341,9 +399,7 @@ function createRow(text, widget, signal, handler) {
     box.add(label);
     box.add(widget);
 
-    row.add(box);
-
-    return row;
+    return box;
 }
 
 function createKeybindingWidget(settings, searchEntry) {
@@ -359,7 +415,7 @@ function createKeybindingWidget(settings, searchEntry) {
 
             let query = searchEntry.get_chars(0, -1).toLowerCase().split(" ");
             let descLc = desc.toLowerCase();
-            
+
             return query.every(word => descLc.indexOf(word) > -1);
         }
     );

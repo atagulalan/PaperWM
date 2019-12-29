@@ -105,6 +105,7 @@ function disable() {
    Handle scrolling horizontally in a space. The handler is meant to be
    connected from each space.background and bound to the space.
  */
+let start, dxs = [], dts = [];
 function horizontalScroll(actor, event) {
     if (event.type() !== Clutter.EventType.TOUCHPAD_SWIPE ||
         event.get_touchpad_gesture_finger_count() > 3) {
@@ -116,7 +117,10 @@ function horizontalScroll(actor, event) {
         let [dx, dy] = event.get_gesture_motion_delta();
         if (direction === undefined) {
             this.vx = 0;
+            dxs = [];
+            dts = [];
             this.hState = phase;
+            start = this.targetX;
             Tweener.removeTweens(this.cloneContainer);
             direction = DIRECTIONS.Horizontal;
         }
@@ -124,102 +128,175 @@ function horizontalScroll(actor, event) {
     case Clutter.TouchpadGesturePhase.CANCEL:
     case Clutter.TouchpadGesturePhase.END:
         this.hState = phase;
-        return done(this);
+        done(this, event);
+        dxs = [];
+        dts = [];
+        return Clutter.EVENT_STOP;
     }
 }
 
 function update(space, dx, t) {
 
-    let v = dx/(t - time);
+    dxs.push(dx);
+    dts.push(t);
+
+    space.cloneContainer.x -= dx;
+    space.targetX = space.cloneContainer.x;
+
+    // Check which target windew will be selected if we releas the swipe at this
+    // moment
+    dx = Utils.sum(dxs.slice(-3));
+    let v = dx/(t - dts.slice(-3)[0]);
     if (Number.isFinite(v)) {
         space.vx = v;
     }
-    time = t;
-    space.targetX -= dx;
-    space.cloneContainer.x = space.targetX;
+
+    let accel = prefs.swipe_friction[0]/16; // px/ms^2
+    accel = space.vx > 0 ? -accel : accel;
+    let duration = -space.vx/accel;
+    let d = space.vx*duration + .5*accel*duration**2;
+    let target = Math.round(space.targetX - d);
+
+    space.targetX = target;
+    let selected = findTargetWindow(space, direction, start - space.targetX > 0);
+    space.targetX = space.cloneContainer.x;
+    Tiling.updateSelection(space, selected);
+    space.selectedWindow = selected;
+    space.emit('select');
+
     return Clutter.EVENT_STOP;
 }
 
 function done(space) {
-    if (!Number.isFinite(space.vx)) {
+    if (!Number.isFinite(space.vx) || space.length === 0) {
         navigator.finish();
         space.hState = -1;
         return Clutter.EVENT_STOP;
     }
-    let test = space.vx > 0 ?
-        () => space.vx < 0 :
-        () => space.vx > 0;
 
+    let startGlide = space.targetX;
+
+    // timetravel
+    let accel = prefs.swipe_friction[0]/16; // px/ms^2
+    accel = space.vx > 0 ? -accel : accel;
+    let t = -space.vx/accel;
+    let d = space.vx*t + .5*accel*t**2;
+    let target = Math.round(space.targetX - d);
+
+    let mode = Clutter.AnimationMode.EASE_OUT_QUAD;
+    let first;
+    let last;
+
+    let full = space.cloneContainer.width > space.width;
     // Only snap to the edges if we started gliding when the viewport is fully covered
-    let snap = !(0 <= space.cloneContainer.x ||
+    let snap = !(0 <= space.targetX ||
                  space.targetX + space.cloneContainer.width <= space.width);
+    if ((snap && target > 0)
+        || (full && target > space.width*2)) {
+        // Snap to left edge
+        first = space[0][0];
+        target = 0;
+        mode = Clutter.AnimationMode.EASE_OUT_BACK;
+    } else if ((snap && target + space.cloneContainer.width < space.width)
+               || (full && target + space.cloneContainer.width < -space.width)) {
+        // Snap to right edge
+        last = space[space.length-1][0];
+        target = space.width - space.cloneContainer.width;
+        mode = Clutter.AnimationMode.EASE_OUT_BACK;
+    }
 
-    let glide = () => {
-        if (space.hState === -1) {
-            focusWindowAtPointer(space);
+    // Adjust for target window
+    let selected;
+    space.targetX = Math.round(target);
+    selected = last || first || findTargetWindow(space, start - target > 0 );
+    delete selected.lastFrame; // Invalidate frame information
+    let x = Tiling.ensuredX(selected, space);
+    target = x - selected.clone.targetX;
+
+    // Scale down travel time if we've cut down the discance to travel
+    let newD = Math.abs(startGlide - target);
+    if (newD < Math.abs(d))
+        t = t*Math.abs(newD/d);
+
+    // Use a minimum duration if we've adjusted travel
+    if (target !== space.targetX || mode === Clutter.AnimationMode.EASE_OUT_BACK) {
+        t = Math.max(t, 200);
+    }
+    space.targetX = target;
+
+    Tiling.updateSelection(space, selected);
+    space.selectedWindow = selected;
+    space.emit('select');
+    Tweener.addTween(space.cloneContainer, {
+        x: space.targetX,
+        duration: t,
+        mode,
+        onComplete: () => {
+            Tiling.ensureViewport(selected, space);
+            if (!Tiling.inPreview)
+                Navigator.getNavigator().finish();
+
         }
-        if (space.hState < Clutter.TouchpadGesturePhase.END)
-            return false;
-
-        if (test() ||
-            (snap && (space.targetX > 0 ||
-                      space.targetX + space.cloneContainer.width < space.width)) ||
-            space.targetX > space.width ||
-            space.targetX + space.cloneContainer.width < 0
-           ) {
-            focusWindowAtPointer(space, snap);
-            space.cloneContainer.set_scale(1, 1);
-            return false;
-        }
-        let dx = space.vx*16;
-        space.targetX -= dx;
-        space.cloneContainer.x = space.targetX;
-        space.vx = space.vx + (space.vx > 0 ? -0.2 : 0.2);
-        return true;
-    };
-
-    imports.mainloop.timeout_add(16, glide, 0);
-    return Clutter.EVENT_STOP;
+    });
 }
 
-function focusWindowAtPointer(space, snap) {
-    let [aX, aY, mask] = global.get_pointer();
-    let [ok, x, y] = space.actor.transform_stage_point(aX, aY);
-    space.targetX = Math.round(space.targetX);
-    space.cloneContainer.x = space.targetX;
 
+function findTargetWindow(space, direction) {
     let selected = space.selectedWindow.clone;
-    if (!(selected.x + space.targetX >= 0 &&
-          selected.x + selected.width + space.targetX <= space.width)) {
-        selected = false;
+    if (selected.x + space.targetX >= 0 &&
+          selected.x + selected.width + space.targetX <= space.width) {
+        return selected.meta_window;
+    }
+    selected = selected && space.selectedWindow;
+    let workArea = space.workArea();
+    let min = workArea.x;
+
+    let windows = space.getWindows().filter(w => {
+        let  clone = w.clone;
+        let x = clone.targetX + space.targetX;
+        return !(x + clone.width < min
+                 || x > min + workArea.width);
+    });
+    if (!direction) // scroll left
+        windows.reverse();
+    let visible = windows.filter(w => {
+        let clone = w.clone;
+        let x = clone.targetX + space.targetX;
+        return x >= 0 &&
+            x + clone.width <= min + workArea.width;
+    });
+    if (visible.length > 0) {
+        return visible[0];
     }
 
-    let pointerAt;
-    let gap = prefs.window_gap/2;
-    for (let w of space.getWindows()) {
-        let clone = w.clone;
-        if (clone.x + space.targetX - gap <= x
-            && x <= clone.x + space.targetX + clone.width + gap) {
-            pointerAt = w;
-            break;
+    if (windows.length === 0) {
+        let first = space.getWindow(0, 0);
+        let last = space.getWindow(space.length - 1, 0);
+        if (direction) {
+            return last;
+        } else {
+            return first;
         }
     }
 
-    let first, last;
-    if (space.cloneContainer.width < space.width) {
-        space.layout();
-    } else if (0 <= space.cloneContainer.x && snap) {
-        first = space[0][0];
-        Tiling.move_to(space, first, {x: 0});
-    } else if (space.targetX + space.cloneContainer.width <= space.width && snap) {
-        last = space[space.length-1][0];
-        Tiling.move_to(space, last, {x: space.width - last.clone.width});
-    }
+    if (windows.length === 1)
+        return windows[0];
 
-    let target = selected || pointerAt || last || first;
-    Tiling.ensureViewport(target, space);
-    if (!Tiling.inPreview)
-        Navigator.getNavigator().finish();
+    let closest = windows[0].clone;
+    let next = windows[1].clone;
+    let r1, r2;
+    if (direction) { // ->
+        r1 = Math.abs(closest.targetX + closest.width + space.targetX)/closest.width;
+        r2 = Math.abs(next.targetX + space.targetX - space.width)/next.width;
+    } else {
+        r1 = Math.abs(closest.targetX + space.targetX - space.width)/closest.width;
+        r2 = Math.abs(next.targetX + next.width + space.targetX)/next.width;
+    }
+    // Choose the window the most visible width (as a ratio)
+    if (r1 > r2)
+        return closest.meta_window;
+    else
+        return next.meta_window;
 }
 
 var transition = 'easeOutQuad';
@@ -230,6 +307,7 @@ function updateVertical(dy, t) {
     let selected = Tiling.spaces.selectedSpace;
     let monitor = navigator.monitor;
     let v = dy/(t - time);
+    time = t;
     const StackPositions = Tiling.StackPositions;
     if (dy > 0
         && selected !== navigator.from
@@ -238,7 +316,7 @@ function updateVertical(dy, t) {
         dy = 0;
         vy = 1;
         selected.actor.y = StackPositions.up*selected.height;
-        Tiling.spaces.selectSpace(Meta.MotionDirection.UP, false, transition);
+        Tiling.spaces.selectStackSpace(Meta.MotionDirection.UP, false, transition);
         selected = Tiling.spaces.selectedSpace;
         Tweener.removeTweens(selected.actor);
         Tweener.addTween(selected.actor, {scale_x: 0.9, scale_y: 0.9, time:
@@ -248,7 +326,7 @@ function updateVertical(dy, t) {
         dy = 0;
         vy = -1;
         selected.actor.y = StackPositions.down*selected.height;
-        Tiling.spaces.selectSpace(Meta.MotionDirection.DOWN, false, transition);
+        Tiling.spaces.selectStackSpace(Meta.MotionDirection.DOWN, false, transition);
         selected = Tiling.spaces.selectedSpace;
         Tweener.removeTweens(selected.actor);
         Tweener.addTween(selected.actor, {scale_x: 0.9, scale_y: 0.9, time:
@@ -291,11 +369,12 @@ function endVertical() {
             return false;
         }
 
-        let friction = 0.05;
         let dy = vy*16;
         let v = vy;
+        let accel = prefs.swipe_friction[1];
+        accel = v > 0 ? -accel : accel;
         updateVertical(dy, time + 16);
-        vy = vy + (v > 0 ? -0.1 : 0.1);
+        vy = vy + accel;
         return true; // repeat
     };
 

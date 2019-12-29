@@ -79,6 +79,32 @@ function init() {
                    liveAltTab,
                    {settings, mutterFlags: Meta.KeyBindingFlags.IS_REVERSED});
 
+    registerAction('switch-monitor-right', () => {
+        Tiling.spaces.switchMonitor(Meta.DisplayDirection.RIGHT, false);
+    }, {settings});
+    registerAction('switch-monitor-left', () => {
+        Tiling.spaces.switchMonitor(Meta.DisplayDirection.LEFT, false);
+    }, {settings});
+    registerAction('switch-monitor-above', () => {
+        Tiling.spaces.switchMonitor(Meta.DisplayDirection.UP, false);
+    }, {settings});
+    registerAction('switch-monitor-below', () => {
+        Tiling.spaces.switchMonitor(Meta.DisplayDirection.DOWN, false);
+    }, {settings});
+
+    registerAction('move-monitor-right', () => {
+        Tiling.spaces.switchMonitor(Meta.DisplayDirection.RIGHT, true);
+    }, {settings});
+    registerAction('move-monitor-left', () => {
+        Tiling.spaces.switchMonitor(Meta.DisplayDirection.LEFT, true);
+    }, {settings});
+    registerAction('move-monitor-above', () => {
+        Tiling.spaces.switchMonitor(Meta.DisplayDirection.UP, true);
+    }, {settings});
+    registerAction('move-monitor-below', () => {
+        Tiling.spaces.switchMonitor(Meta.DisplayDirection.DOWN, true);
+    }, {settings});
+
     registerNavigatorAction('previous-workspace', Tiling.selectPreviousSpace);
     registerNavigatorAction('previous-workspace-backward',
                             Tiling.selectPreviousSpaceBackwards);
@@ -86,6 +112,12 @@ function init() {
     registerNavigatorAction('move-previous-workspace', Tiling.movePreviousSpace);
     registerNavigatorAction('move-previous-workspace-backward',
                             Tiling.movePreviousSpaceBackwards);
+
+    registerNavigatorAction('switch-down-workspace', Tiling.selectDownSpace);
+    registerNavigatorAction('switch-up-workspace', Tiling.selectUpSpace);
+
+    registerNavigatorAction('move-down-workspace', Tiling.moveDownSpace);
+    registerNavigatorAction('move-up-workspace', Tiling.moveUpSpace);
 
     registerNavigatorAction('take-window', Tiling.takeWindow);
 
@@ -142,7 +174,7 @@ function init() {
                         Meta.KeyBindingFlags.PER_WINDOW);
 
     registerPaperAction('new-window',
-                        dynamic_function_ref('newWindow',
+                        dynamic_function_ref('duplicateWindow',
                                        App),
                         Meta.KeyBindingFlags.PER_WINDOW);
 
@@ -503,6 +535,9 @@ function resolveConflicts() {
     for (let conflict of Settings.findConflicts()) {
         let {name, conflicts} = conflict;
         let action = byMutterName(name);
+        // Actionless key, can happen with updated schema without restart
+        if (!action)
+            continue;
         conflicts.forEach(c => overrideAction(c, action));
         overrides.push(conflict);
     }
@@ -517,7 +552,9 @@ function resetConflicts() {
         // null. However gnome-shell often sets a custom handler of its own,
         // which means we most often can't rely on that
         if (name.startsWith('switch-to-workspace-') ||
-            name.startsWith('move-to-workspace-')) {
+            name.startsWith('move-to-workspace-') ||
+            name.startsWith('move-to-monitor-')
+           ) {
             Main.wm.setCustomKeybindingHandler(
                 name,
                 Shell.ActionMode.NORMAL |

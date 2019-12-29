@@ -4,7 +4,8 @@
 
 PaperWM is an experimental [Gnome Shell](https://wiki.gnome.org/Projects/GnomeShell) extension providing scrollable tiling of windows and per monitor workspaces. It's inspired by paper notebooks and tiling window managers.
 
-Supports Gnome Shell from 3.28 to 3.34 on X11 and wayland.
+Supports Gnome Shell from 3.28 to 3.34 on X11 and wayland (if you're using
+gnome-shell 3.35 you can use [this branch](https://github.com/paperwm/PaperWM/tree/gnome-shell-3.36)).
 
 While technically an [extension](https://wiki.gnome.org/Projects/GnomeShell/Extensions) it's to a large extent built on top of the Gnome desktop rather than merely extending it.
 
@@ -17,6 +18,11 @@ Clone the repo and run the [`install.sh`](https://github.com/paperwm/PaperWM/blo
 ./install.sh
 ```
 
+You'll by default follow the
+[develop](https://github.com/paperwm/PaperWM/tree/develop) branch. If you want a
+possibly more stable experience you can follow the releases by checking out the
+[master](https://github.com/paperwm/PaperWM/tree/master) branch.
+
 Cloning the repo directly into `$XDG_DATA_HOME` also works:
 ```bash
 git clone 'https://github.com/paperwm/PaperWM.git' \
@@ -28,7 +34,7 @@ You can then enable the extension in Gnome Tweaks, or enable if from the command
 gnome-shell-extension-tool -e paperwm@hedning:matrix.org
 ```
 
-There's a few Gnome Shell settings which works poorly with PaperWM. To use the recommended settings run [`set-recommended-gnome-shell-settings.sh`](https://github.com/paperwm/PaperWM/blob/master/set-recommended-gnome-shell-settings.sh). A "restore previous settings" script is generated so the original settings is not lost.
+There's a few Gnome Shell settings which works poorly with PaperWM. To use the recommended settings run [`set-recommended-gnome-shell-settings.sh`](https://github.com/paperwm/PaperWM/blob/master/set-recommended-gnome-shell-settings.sh). A "restore previous settings" script is generated so the original settings is not lost. (The script will turn `auto-maximize`, `edge-tiling`, `attach-modal-dialogs` and `workspaces-only-on-primary` off).
 
 Running the extension will automatic install a user config file as described in [Development & user configuration](#development--user-configuration).
 
@@ -39,14 +45,14 @@ The desktop-icon extension (which is on by default) and PaperWM is not compatibl
 
 Ubuntu makes it difficult to disable desktop-icon so it is suggested to use vanilla gnome session instead `sudo apt install gnome-session` and select `gnome` or `gnome-wayland` using the gear icon on login.
 
-`desktop-icon` can (sometimes) be disabled via the web interface if the GNOME Shell integration is installed on the browser: https://extensions.gnome.org/local/ or via gnome tweaks `sudo apt install gnome-tweaks` and be disabled under the extensions tab.  
+`desktop-icon` can (sometimes) be disabled via the web interface if the GNOME Shell integration is installed on the browser: https://extensions.gnome.org/local/ or via gnome tweaks `sudo apt install gnome-tweaks` and be disabled under the extensions tab.
 
 
 ## Usage ##
 
 Most functionality is available using a mouse, eg. activating a window at the edge of the monitor by clicking on it. In wayland its possible to navigate with 3-finger swipes on the trackpad. But the primary focus is making an environment which works well with a keyboard.
 
-All keybindings start with the <kbd>Super</kbd> modifier. On most keyboards it's the Windows key, on mac keyboards it's the Command key. It's possible and recommended to modify the keyboard layout so that <kbd>Super</kbd> is switched with <kbd>Alt</kbd> making all the keybindings easier to reach. This can be done through Gnome Tweaks under `Keybard & Mouse` ⟶ `Additional Layout Options` ⟶ `Alt/Win key behavior` ⟶ `Left Alt is swapped with Left Win`.
+All keybindings start with the <kbd>Super</kbd> modifier. On most keyboards it's the Windows key, on mac keyboards it's the Command key. It's possible to modify the keyboard layout so that <kbd>Super</kbd> is switched with <kbd>Alt</kbd> making all the keybindings easier to reach. This can be done through Gnome Tweaks under `Keybard & Mouse` ⟶ `Additional Layout Options` ⟶ `Alt/Win key behavior` ⟶ `Left Alt is swapped with Left Win`.
 
 Most keybindings will grab the keyboard while <kbd>Super</kbd> is held down, only switching focus when <kbd>Super</kbd> is released. <kbd>Escape</kbd> will abort the navigation taking you back to the previously active window.
 
@@ -95,9 +101,13 @@ PaperWM doesn't handle attached modal dialogs very well, so it's best to turn it
 
 ### The workspace stack & monitors ###
 
+Pressing <kbd>Super</kbd><kbd>Above_Tab</kbd> will slide the active workspace down revealing the stack as shown in the above screenshot. You can then flip through the most recently used workspaces with repeated <kbd>Above_Tab</kbd> presses while holding <kbd>Super</kbd> down. <kbd>Above_Tab</kbd> is the key above <kbd>Tab</kbd> (<kbd>\`</kbd> in a US qwerty layout). Like alt-tab <kbd>Shift</kbd> is added to move in reverse order:
+
 ![The most recently used workspace stack](https://github.com/paperwm/media/blob/master/stack.png)
 
-Pressing <kbd>Super</kbd><kbd>Above_Tab</kbd> will slide the active workspace down revealing the stack as shown in the above screenshot. You can then flip through the most recently used workspaces with repeated <kbd>Above_Tab</kbd> presses while holding <kbd>Super</kbd> down. <kbd>Above_Tab</kbd> is the key above <kbd>Tab</kbd> (<kbd>\`</kbd> in a US qwerty layout). Like alt-tab <kbd>Shift</kbd> is added to move in reverse order.
+Pressing <kbd>Super</kbd><kbd>Page_Down</kbd> and <kbd>Super</kbd><kbd>Page_Up</kbd> will slide between workspaces sequentially:
+
+![Sequential workspace navigation](https://github.com/paperwm/media/blob/master/sequence.png)
 
 The workspace name is shown in the top left corner replacing the `Activities` button adding a few enhancements. Scrolling on the name will let you browse the workspace stack just like <kbd>Super</kbd><kbd>Above_Tab</kbd>. Right clicking the name lets you access and change the workspace name and the background color:
 
@@ -107,14 +117,22 @@ Swiping the trackpad vertically with three fingers lets you navigate the workspa
 
 There's a single scrollable tiling per workspace. Adding another monitor simply makes it possible to have another workspace visible. The workspace stack is shared among all the monitors, windows being resized vertically as necessary when workspace is displayed on another monitor.
 
-PaperWM currently works best using static workspaces, this can be turned on with Gnome Tweaks under Workspaces.
+PaperWM currently works best using the workspaces span monitors preference, this can be turned on with Gnome Tweaks under Workspaces. If you want to use workspaces only on primary you need to place the secondary monitor either below or above the primary (with the best result having it below).
 
-| Keybindings                                                                                                              |                                                                                   |
-| ------                                                                                                                   | -------                                                                           |
-| <kbd>Super</kbd><kbd>Above_Tab</kbd> or <kbd>Super</kbd><kbd>Page_Down</kbd>                                             | Cycle through the most recently used workspaces                                   |
-| <kbd>Super</kbd><kbd>Shift</kbd><kbd>Above_Tab</kbd> or <kbd>Super</kbd><kbd>Page_Up</kbd>                               | Cycle backwards through the most recently used workspaces                         |
-| <kbd>Super</kbd><kbd>Ctrl</kbd><kbd>Above_Tab</kbd> or <kbd>Super</kbd><kbd>Ctrl</kbd><kbd>Page_Down</kbd>               | Cycle through the most recently used, taking the active window with you           |
-| <kbd>Super</kbd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Above_Tab</kbd> or <kbd>Super</kbd><kbd>Ctrl</kbd><kbd>Page_Up</kbd> | Cycle backwards through the most recently used, taking the active window with you |
+| Workspace Keybindings                                                  |                                                                                   |
+| ------                                                                 | -------                                                                           |
+| <kbd>Super</kbd><kbd>Above_Tab</kbd>                                   | Cycle through the most recently used workspaces                                   |
+| <kbd>Super</kbd><kbd>Shift</kbd><kbd>Above_Tab</kbd>                   | Cycle backwards through the most recently used workspaces                         |
+| <kbd>Super</kbd><kbd>Ctrl</kbd><kbd>Above_Tab</kbd>                    | Cycle through the most recently used, taking the active window with you           |
+| <kbd>Super</kbd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Above_Tab</kbd>    | Cycle backwards through the most recently used, taking the active window with you |
+| <kbd>Super</kbd><kbd>Page_Down</kbd>/<kbd>Page_Up</kbd>                | Cycle sequentially through workspaces                                             |
+| <kbd>Super</kbd><kbd>Ctrl</kbd><kbd>Page_Down</kbd>/<kbd>Page_Up</kbd> | Cycle sequentially through workspaces, taking the active window with you          |
+
+
+| Monitor Keybindings                                                 |                                            |
+| ------                                                              | -------                                    |
+| <kbd>Super</kbd><kbd>Shift</kbd><kbd>Arrow_key</kbd>                | Select neighbouring monitor                |
+| <kbd>Super</kbd><kbd>Shift</kbd><kbd>Ctrl</kbd><kbd>Arrow_key</kbd> | Move active window to neighbouring monitor |
 
 ### Scratch layer ###
 

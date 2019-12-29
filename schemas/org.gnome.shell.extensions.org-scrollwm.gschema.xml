@@ -20,21 +20,75 @@
     </key>
 
     <key type="as" name="previous-workspace">
-      <default><![CDATA[['<Super>Above_Tab', '<Super>Page_Down']]]></default>
+      <default><![CDATA[['<Super>Above_Tab']]]></default>
       <summary>Switch to previously active workspace</summary>
     </key>
     <key type="as" name="previous-workspace-backward">
-      <default><![CDATA[['<Super><Shift>Above_Tab',  '<Super>Page_Up']]]></default>
+      <default><![CDATA[['<Super><Shift>Above_Tab']]]></default>
       <summary>Switch to the previously active workspace, backward order</summary>
     </key>
 
     <key type="as" name="move-previous-workspace">
-      <default><![CDATA[['<Super><Ctrl>Above_Tab', '<Super><Ctrl>Page_Down']]]></default>
+      <default><![CDATA[['<Super><Ctrl>Above_Tab']]]></default>
       <summary>Move the active window to the previously active workspace</summary>
     </key>
     <key type="as" name="move-previous-workspace-backward">
-      <default><![CDATA[['<Super><Shift><Ctrl>Above_Tab', '<Super><Ctrl>Page_Up']]]></default>
+      <default><![CDATA[['<Super><Shift><Ctrl>Above_Tab']]]></default>
       <summary>Move the active window to the previously active workspace, backward order</summary>
+    </key>
+
+    <key type="as" name="switch-down-workspace">
+      <default><![CDATA[['<Super>Page_Down']]]></default>
+      <summary>Switch to workspace below</summary>
+    </key>
+
+    <key type="as" name="switch-up-workspace">
+      <default><![CDATA[['<Super>Page_Up']]]></default>
+      <summary>Switch to workspace above</summary>
+    </key>
+
+    <key type="as" name="move-down-workspace">
+      <default><![CDATA[['<Super><Ctrl>Page_Down']]]></default>
+      <summary>Move window one workspace down</summary>
+    </key>
+    <key type="as" name="move-up-workspace">
+      <default><![CDATA[['<Super><Ctrl>Page_Up']]]></default>
+      <summary>Move window one workspace up</summary>
+    </key>
+
+
+    <key type="as" name="move-monitor-right">
+        <default><![CDATA[['<Super><Shift><Ctrl>Right']]]></default>
+        <summary>Move the active window to the right monitor</summary>
+    </key>
+    <key type="as" name="move-monitor-left">
+        <default><![CDATA[['<Super><Shift><Ctrl>Left']]]></default>
+        <summary>Move the active window to the left monitor</summary>
+    </key>
+    <key type="as" name="move-monitor-above">
+        <default><![CDATA[['<Super><Shift><Ctrl>Up']]]></default>
+        <summary>Move the active window to the above monitor</summary>
+    </key>
+    <key type="as" name="move-monitor-below">
+        <default><![CDATA[['<Super><Shift><Ctrl>Down']]]></default>
+        <summary>Move the active window to the below monitor</summary>
+    </key>
+
+    <key type="as" name="switch-monitor-right">
+        <default><![CDATA[['<Super><Shift>Right']]]></default>
+        <summary>Switch to the right monitor</summary>
+    </key>
+    <key type="as" name="switch-monitor-left">
+        <default><![CDATA[['<Super><Shift>Left']]]></default>
+        <summary>Switch to the left monitor</summary>
+    </key>
+    <key type="as" name="switch-monitor-above">
+        <default><![CDATA[['<Super><Shift>Up']]]></default>
+        <summary>Switch to the above monitor</summary>
+    </key>
+    <key type="as" name="switch-monitor-below">
+        <default><![CDATA[['<Super><Shift>Down']]]></default>
+        <summary>Switch to the below monitor</summary>
     </key>
 
     <key type="as" name="toggle-scratch-window">
@@ -177,6 +231,10 @@
           <default>''</default>
           <summary>The background color</summary>
       </key>
+      <key type="s" name="directory">
+          <default>''</default>
+          <summary>Affect various integrations. An empty string means use PWD. (usually ~)</summary>
+      </key>
   </schema>
 
   <schema id="org.gnome.Shell.Extensions.PaperWM.WorkspaceList"
@@ -236,8 +294,13 @@
     </key>
 
     <key type="ad" name="swipe-sensitivity">
-        <default><![CDATA[[1.0, 2.0]]]></default>
+        <default><![CDATA[[2.0, 2.0]]]></default>
         <summary>Swipe sensitivity in [x, y] coordinates</summary>
+    </key>
+
+    <key type="ad" name="swipe-friction">
+        <default><![CDATA[[0.3, 0.1]]]></default>
+        <summary>Swipe friction in [x, y] coordinates</summary>
     </key>
 
     <key type="ad" name="cycle-width-steps">
@@ -261,6 +324,11 @@
     <key type="s" name="default-background">
         <default>''</default>
         <summary>Default background image</summary>
+    </key>
+
+    <key type="b" name="use-default-background">
+        <default>false</default>
+        <summary>Use the default gnome shell background</summary>
     </key>
 
     <key type="b" name="default-show-top-bar">

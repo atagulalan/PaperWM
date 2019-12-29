@@ -1,7 +1,8 @@
 /**
   Some of Gnome Shell's default behavior is really sub-optimal when using
-  paperWM. This is a collection of monkey patches and preferences which works
-  around these problems.
+  paperWM. Other features are simply not possible to implement without monkey
+  patching. This is a collection of monkey patches and preferences which works
+  around these problems and facilitates new features.
  */
 
 var Extension;
@@ -13,9 +14,11 @@ if (imports.misc.extensionUtils.extensions) {
 
 
 var Meta = imports.gi.Meta;
+var Gio = imports.gi.Gio;
 var Main = imports.ui.main;
 var Mainloop = imports.mainloop;
 var Workspace = imports.ui.workspace;
+var WindowManager = imports.ui.windowManager;
 var Shell = imports.gi.Shell;
 var utils = Extension.imports.utils;
 
@@ -37,6 +40,22 @@ function overrideHotCorners() {
     }
 }
 
+if (!global.display.get_monitor_scale) {
+    // `get_monitor_scale` first appeared in 3.31.92. Polyfill a fallback for 3.28
+    global.display.constructor.prototype.get_monitor_scale = () => 1.0;
+}
+
+if (!global.display.get_monitor_neighbor_index) {
+    // `get_monitor_neighbor_index` polyfill a fallback for 3.28
+    global.display.constructor.prototype.get_monitor_neighbor_index = function(...args) {
+        return global.screen.get_monitor_neighbor_index(...args);
+    }
+}
+
+// polyfill for 3.28
+if (!Meta.DisplayDirection && Meta.ScreenDirection) {
+    Meta.DisplayDirection = Meta.ScreenDirection;
+}
 
 if (!St.Settings) {
     // `St.Settings` doesn't exist in 3.28 - polyfill:
@@ -167,22 +186,28 @@ function _realRecalculateWindowPositions(flags) {
         return;
 
     let space = Tiling.spaces.spaceOf(this.metaWorkspace);
-    clones.sort((a, b) => {
-        let aw = a.metaWindow;
-        let bw = b.metaWindow;
-        let ia = space.indexOf(aw);
-        let ib = space.indexOf(bw);
-        if (ia === -1 && ib === -1) {
+    if (space) {
+        clones.sort((a, b) => {
+            let aw = a.metaWindow;
+            let bw = b.metaWindow;
+            let ia = space.indexOf(aw);
+            let ib = space.indexOf(bw);
+            if (ia === -1 && ib === -1) {
+                return a.metaWindow.get_stable_sequence() - b.metaWindow.get_stable_sequence();
+            }
+            if (ia === -1) {
+                return -1;
+            }
+            if (ib === -1) {
+                return 1;
+            }
+            return ia - ib;
+        });
+    } else {
+        clones.sort((a, b) => {
             return a.metaWindow.get_stable_sequence() - b.metaWindow.get_stable_sequence();
-        }
-        if (ia === -1) {
-            return -1;
-        }
-        if (ib === -1) {
-            return 1;
-        }
-        return ia - ib;
-    });
+        });
+    }
 
     if (this._reservedSlot)
         clones.push(this._reservedSlot);
@@ -196,7 +221,7 @@ function _realRecalculateWindowPositions(flags) {
 function getOriginalPosition() {
     let c = this.metaWindow.clone;
     let space = Tiling.spaces.spaceOfWindow(this.metaWindow);
-    if (space.indexOf(this.metaWindow) === -1) {
+    if (!space || space.indexOf(this.metaWindow) === -1) {
         return [this._boundingBox.x, this._boundingBox.y];
     }
     let [x, y] = [ space.monitor.x + space.targetX + c.targetX, space.monitor.y + c.y];
@@ -216,27 +241,81 @@ function disableHotcorners() {
     }
 }
 
-var savedMethods;
-function saveMethod(obj, name) {
-    let method = obj[name];
-    let methods = savedMethods.get(obj);
-    if (!methods) {
-        methods = {};
-        savedMethods.set(obj, methods);
+var savedProps;
+savedProps = savedProps || new Map();
+
+function registerOverrideProp(obj, name, override) {
+    let saved = getSavedProp(obj, name) || obj[name];
+    let props = savedProps.get(obj);
+    if (!props) {
+        props = {};
+        savedProps.set(obj, props);
     }
-    methods[name] = method;
+    props[name] = {
+        saved,
+        override
+    };
 }
 
-function getMethod(obj, name) {
-    let methods = savedMethods.get(obj);
-    return methods[name];
+function registerOverridePrototype(obj, name, override) {
+    registerOverrideProp(obj.prototype, name, override);
+}
+
+function makeFallback(obj, method, ...args) {
+    let fallback = getSavedPrototype(obj, method);
+    return fallback.bind(...args);
+}
+
+function overrideWithFallback(obj, method, body) {
+    registerOverridePrototype(
+        obj, method, function(...args) {
+            let fallback = makeFallback(obj, method, this, ...args);
+            body(fallback, this, ...args);
+        }
+    );
+}
+
+function getSavedProp(obj, name) {
+    let props = savedProps.get(obj);
+    if (!props)
+        return undefined;
+    let prop = props[name];
+    if (!prop)
+        return undefined;
+    return prop.saved;
+}
+
+function getSavedPrototype(obj, name) {
+    return getSavedProp(obj.prototype, name);
 }
 
 
-function overrideMethod(obj, name, method) {
-    if (!getMethod(obj, name))
-        saveMethod(obj, name);
-    obj[name] = method;
+function disableOverride(obj, name) {
+    obj[name] = getSavedProp(obj, name);
+}
+
+function enableOverride(obj, name) {
+    let props = savedProps.get(obj);
+    let override = props[name].override;
+    if (override !== undefined) {
+        obj[name] = override;
+    }
+}
+
+function enableOverrides() {
+    for (let [obj, props] of savedProps) {
+        for (let name in props) {
+            enableOverride(obj, name);
+        }
+    }
+}
+
+function disableOverrides() {
+    for (let [obj, props] of savedProps) {
+        for (let name in props) {
+            obj[name] = props[name].saved;
+        }
+    }
 }
 
 function restoreMethod(obj, name) {
@@ -247,45 +326,64 @@ function restoreMethod(obj, name) {
 
 var signals;
 function init() {
-    savedMethods = new Map();
-    saveMethod(imports.ui.messageTray.MessageTray.prototype, '_updateState');
-    saveMethod(imports.ui.windowManager.WindowManager.prototype, '_prepareWorkspaceSwitch');
-    saveMethod(Workspace.Workspace.prototype, '_isOverviewWindow');
-    saveMethod(Workspace.WindowClone.prototype, 'getOriginalPosition');
-    saveMethod(Workspace.Workspace.prototype, '_realRecalculateWindowPositions');
-    saveMethod(Workspace.UnalignedLayoutStrategy.prototype, '_sortRow');
-    saveMethod(imports.ui.windowManager.WorkspaceTracker.prototype, '_checkWorkspaces');
+    registerOverridePrototype(imports.ui.messageTray.MessageTray, '_updateState');
+    registerOverridePrototype(WindowManager.WindowManager, '_prepareWorkspaceSwitch');
+    registerOverridePrototype(Workspace.Workspace, '_isOverviewWindow');
+    registerOverridePrototype(Workspace.WindowClone, 'getOriginalPosition');
+    registerOverridePrototype(Workspace.Workspace, '_realRecalculateWindowPositions');
+    registerOverridePrototype(Workspace.UnalignedLayoutStrategy, '_sortRow');
+    registerOverridePrototype(WindowManager.WorkspaceTracker, '_checkWorkspaces', _checkWorkspaces);
+    registerOverridePrototype(WindowManager.TouchpadWorkspaceSwitchAction, '_checkActivated');
+
+    // Work around https://gitlab.gnome.org/GNOME/gnome-shell/issues/1884
+    if (!WindowManager.WindowManager.prototype._removeEffect) {
+        registerOverridePrototype(WindowManager.WindowManager, '_mapWindowOverwrite',
+                                  function (shellwm, actor) {
+                                      if (this._mapping.delete(actor)) {
+                                          shellwm.completed_map(actor);
+                                      }
+                                  });
+    }
+
+    if (version[1] > 32)
+        registerOverridePrototype(Workspace.UnalignedLayoutStrategy, 'computeLayout', computeLayout);
+
+    // Kill pinch gestures as they work pretty bad (especially when 3-finger swiping)
+    registerOverrideProp(imports.ui.viewSelector, "PINCH_GESTURE_THRESHOLD", 0);
+
+    registerOverridePrototype(Workspace.Workspace, '_isOverviewWindow', (win) => {
+        let metaWindow = win.meta_window;
+        return Scratch.isScratchWindow(metaWindow) && !metaWindow.skip_taskbar;
+    });
 
     signals = new utils.Signals();
 }
 
 function enable() {
+    enableOverrides();
 
     signals.connect(settings, 'changed::override-hot-corner',
                     disableHotcorners);
     disableHotcorners();
 
-
     function onlyScratchInOverview() {
-        let obj = Workspace.Workspace.prototype;
-        let name = '_isOverviewWindow';
         if (settings.get_boolean('only-scratch-in-overview')) {
-            overrideMethod(obj, name, (win) => {
-                let metaWindow = win.meta_window;
-                return Scratch.isScratchWindow(metaWindow) && !metaWindow.skip_taskbar;
-            });
+            enableOverride(Workspace.Workspace.prototype, '_isOverviewWindow');
         } else {
-            restoreMethod(obj, name);
+            disableOverride(Workspace.Workspace.prototype, '_isOverviewWindow');
         }
     }
     signals.connect(settings, 'changed::only-scratch-in-overview',
                     onlyScratchInOverview);
     onlyScratchInOverview();
 
+
+    // Disable switching the workspace after 4 finger swipe.
+    WindowManager.TouchpadWorkspaceSwitchAction.prototype._checkActivated = () => false;
     /* The «native» workspace animation can be now (3.30) be disabled as it
        calls out of the function bound to the `switch-workspace` signal.
      */
-    imports.ui.windowManager.WindowManager.prototype._prepareWorkspaceSwitch =
+    WindowManager.WindowManager.prototype._prepareWorkspaceSwitch =
         function (from, to, direction) {
             if (this._switchData)
                 return;
@@ -376,89 +474,155 @@ function enable() {
             };
     }
 
-    imports.ui.windowManager.WorkspaceTracker.prototype._checkWorkspaces = function () {
-        let workspaceManager = global.workspace_manager;
-        let i;
-        let emptyWorkspaces = [];
 
-        if (!Meta.prefs_get_dynamic_workspaces()) {
-            this._checkWorkspacesId = 0;
-            return false;
-        }
-
-        // Update workspaces only if Dynamic Workspace Management has not been paused by some other function
-        if (this._pauseWorkspaceCheck || Tiling.inPreview)
-            return true;
-
-        for (i = 0; i < this._workspaces.length; i++) {
-            let lastRemoved = this._workspaces[i]._lastRemovedWindow;
-            if ((lastRemoved &&
-                 (lastRemoved.get_window_type() == Meta.WindowType.SPLASHSCREEN ||
-                  lastRemoved.get_window_type() == Meta.WindowType.DIALOG ||
-                  lastRemoved.get_window_type() == Meta.WindowType.MODAL_DIALOG)) ||
-                this._workspaces[i]._keepAliveId)
-                emptyWorkspaces[i] = false;
-            else
-                emptyWorkspaces[i] = true;
-        }
-
-        let sequences = Shell.WindowTracker.get_default().get_startup_sequences();
-        for (i = 0; i < sequences.length; i++) {
-            let index = sequences[i].get_workspace();
-            if (index >= 0 && index <= workspaceManager.n_workspaces)
-                emptyWorkspaces[index] = false;
-        }
-
-        let windows = global.get_window_actors();
-        for (i = 0; i < windows.length; i++) {
-            let actor = windows[i];
-            let win = actor.get_meta_window();
-
-            if (win.is_on_all_workspaces())
-                continue;
-
-            let workspaceIndex = win.get_workspace().index();
-            emptyWorkspaces[workspaceIndex] = false;
-        }
-
-        // If we don't have an empty workspace at the end, add one
-        if (!emptyWorkspaces[emptyWorkspaces.length -1]) {
-            workspaceManager.append_new_workspace(false, global.get_current_time());
-            emptyWorkspaces.push(true);
-        }
-
-        let lastIndex = emptyWorkspaces.length - 1;
-        let lastEmptyIndex = emptyWorkspaces.lastIndexOf(false) + 1;
-        let activeWorkspaceIndex = workspaceManager.get_active_workspace_index();
-        emptyWorkspaces[activeWorkspaceIndex] = false;
-
-        // Delete empty workspaces except for the last one; do it from the end
-        // to avoid index changes
-        for (i = lastIndex; i >= 0; i--) {
-            if (workspaceManager.n_workspaces <= Main.layoutManager.monitors.length + 1)
-                break;
-            if (emptyWorkspaces[i] && i != lastEmptyIndex) {
-                let space = Tiling.spaces.spaceOf(this._workspaces[i]);
-                let visibleSpace = Tiling.spaces.monitors.get(space.monitor);
-                // Never remove visible spaces
-                if (space !== visibleSpace) {
-                    workspaceManager.remove_workspace(this._workspaces[i], global.get_current_time());
-                }
-            }
-        }
-
-        this._checkWorkspacesId = 0;
-        return false;
-    };
 }
 
 function disable() {
-    for (let [obj, methods] of savedMethods) {
-        for (let name in methods) {
-            restoreMethod(obj, name);
-        }
-    }
+    disableOverrides();
 
     signals.destroy();
     Main.layoutManager._updateHotCorners();
 }
+
+// 3.32 overivew layout
+function computeLayout(windows, layout) {
+    let numRows = layout.numRows;
+
+    let rows = [];
+    let totalWidth = 0;
+    for (let i = 0; i < windows.length; i++) {
+        let window = windows[i];
+        let s = this._computeWindowScale(window);
+        totalWidth += window.width * s;
+    }
+
+    let idealRowWidth = totalWidth / numRows;
+    let windowIdx = 0;
+    for (let i = 0; i < numRows; i++) {
+        let col = 0;
+        let row = this._newRow();
+        rows.push(row);
+
+        for (; windowIdx < windows.length; windowIdx++) {
+            let window = windows[windowIdx];
+            let s = this._computeWindowScale(window);
+            let width = window.width * s;
+            let height = window.height * s;
+            row.fullHeight = Math.max(row.fullHeight, height);
+
+            // either new width is < idealWidth or new width is nearer from idealWidth then oldWidth
+            if (this._keepSameRow(row, window, width, idealRowWidth) || (i == numRows - 1)) {
+                row.windows.push(window);
+                row.fullWidth += width;
+            } else {
+                break;
+            }
+        }
+    }
+
+    let gridHeight = 0;
+    let maxRow;
+    for (let i = 0; i < numRows; i++) {
+        let row = rows[i];
+        this._sortRow(row);
+
+        if (!maxRow || row.fullWidth > maxRow.fullWidth)
+            maxRow = row;
+        gridHeight += row.fullHeight;
+    }
+
+    layout.rows = rows;
+    layout.maxColumns = maxRow.windows.length;
+    layout.gridWidth = maxRow.fullWidth;
+    layout.gridHeight = gridHeight;
+}
+
+const wmSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.wm.preferences'});
+function _checkWorkspaces() {
+    let workspaceManager = global.workspace_manager;
+    let i;
+    let emptyWorkspaces = [];
+
+    if (!Meta.prefs_get_dynamic_workspaces()) {
+        this._checkWorkspacesId = 0;
+        return false;
+    }
+
+    // Update workspaces only if Dynamic Workspace Management has not been paused by some other function
+    if (this._pauseWorkspaceCheck || Tiling.inPreview)
+        return true;
+
+    for (i = 0; i < this._workspaces.length; i++) {
+        let lastRemoved = this._workspaces[i]._lastRemovedWindow;
+        if ((lastRemoved &&
+             (lastRemoved.get_window_type() == Meta.WindowType.SPLASHSCREEN ||
+              lastRemoved.get_window_type() == Meta.WindowType.DIALOG ||
+              lastRemoved.get_window_type() == Meta.WindowType.MODAL_DIALOG)) ||
+            this._workspaces[i]._keepAliveId)
+            emptyWorkspaces[i] = false;
+        else
+            emptyWorkspaces[i] = true;
+    }
+
+    let sequences = Shell.WindowTracker.get_default().get_startup_sequences();
+    for (i = 0; i < sequences.length; i++) {
+        let index = sequences[i].get_workspace();
+        if (index >= 0 && index <= workspaceManager.n_workspaces)
+            emptyWorkspaces[index] = false;
+    }
+
+    let windows = global.get_window_actors();
+    for (i = 0; i < windows.length; i++) {
+        let actor = windows[i];
+        let win = actor.get_meta_window();
+
+        if (win.is_on_all_workspaces())
+            continue;
+
+        let workspaceIndex = win.get_workspace().index();
+        emptyWorkspaces[workspaceIndex] = false;
+    }
+
+    let minimum = wmSettings.get_int('num-workspaces');
+    // Make sure we have a minimum number of spaces
+    for (i = 0; i < Math.max(Main.layoutManager.monitors.length, minimum); i++) {
+        if (i >= emptyWorkspaces.length) {
+            workspaceManager.append_new_workspace(false, global.get_current_time());
+            emptyWorkspaces.push(true);
+        }
+    }
+
+    // If we don't have an empty workspace at the end, add one
+    if (!emptyWorkspaces[emptyWorkspaces.length -1]) {
+        workspaceManager.append_new_workspace(false, global.get_current_time());
+        emptyWorkspaces.push(true);
+    }
+
+    let lastIndex = emptyWorkspaces.length - 1;
+    let lastEmptyIndex = emptyWorkspaces.lastIndexOf(false) + 1;
+    let activeWorkspaceIndex = workspaceManager.get_active_workspace_index();
+
+    // Keep the active workspace
+    emptyWorkspaces[activeWorkspaceIndex] = false;
+
+    // Keep a minimum number of spaces
+    for (i = 0; i < Math.max(Main.layoutManager.monitors.length, minimum); i++) {
+        emptyWorkspaces[i] = false;
+    }
+
+    // Keep visible spaces
+    for (let [monitor, space] of Tiling.spaces.monitors) {
+        emptyWorkspaces[space.workspace.index()] = false;
+    }
+
+    // Delete empty workspaces except for the last one; do it from the end
+    // to avoid index changes
+    for (i = lastIndex; i >= 0; i--) {
+        if (emptyWorkspaces[i] && i != lastEmptyIndex) {
+            workspaceManager.remove_workspace(this._workspaces[i], global.get_current_time());
+        }
+    }
+
+    this._checkWorkspacesId = 0;
+    return false;
+};

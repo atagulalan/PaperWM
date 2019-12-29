@@ -14,14 +14,13 @@ var display = global.display;
 var GObject = imports.gi.GObject;
 var registerClass;
 
+var version = imports.misc.config.PACKAGE_VERSION.split('.').map(Number);
 {
-    let version = imports.misc.config.PACKAGE_VERSION.split('.');
     if (version[0] >= 3 && version[1] > 30) {
         registerClass = GObject.registerClass;
     } else {
-        registerClass = (x => x);
+        registerClass = (x, y) => y ? y : x;
     }
-
 }
 
 var debug_all = false; // Turn off by default
@@ -163,6 +162,7 @@ function setDevGlobals() {
     workspace = workspaceManager.get_active_workspace();
     actor = metaWindow.get_compositor_private();
     space = Tiling.spaces.spaceOfWindow(metaWindow);
+    app = imports.gi.Shell.WindowTracker.get_default().get_window_app(metaWindow);
 }
 
 /**

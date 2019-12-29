@@ -33,7 +33,7 @@ var META_KEY_ABOVE_TAB = 0x2f7259c9;
 var prefs = {};
 ['window-gap', 'vertical-margin', 'vertical-margin-bottom', 'horizontal-margin',
  'workspace-colors', 'default-background', 'animation-time', 'use-workspace-name',
- 'pressure-barrier', 'default-show-top-bar', 'swipe-sensitivity',
+ 'pressure-barrier', 'default-show-top-bar', 'swipe-sensitivity', 'swipe-friction',
  'cycle-width-steps', 'cycle-height-steps']
     .forEach((k) => setState(null, k));
 
@@ -96,6 +96,11 @@ function init() {
         scratch_layer: true,
         focus: true,
     });
+    defwinprop({
+        wm_class: /gnome-screenshot/i,
+        scratch_layer: true,
+        focus: true,
+    });
 }
 
 var id;
@@ -142,7 +147,34 @@ function getWorkspaceSettingsByUUID(uuid) {
     return workspaceSettingsCache[uuid];
 }
 
-// Only used for debugging/development atm.
+/** Returns [[uuid, settings, name], ...] (Only used for debugging/development atm.) */
+function findWorkspaceSettingsByName(regex) {
+    let list = workspaceList.get_strv('list');
+    let settingss = list.map(getWorkspaceSettingsByUUID);
+    return Extension.imports.utils.zip(list, settingss, settingss.map(s => s.get_string('name')))
+        .filter(([uuid, s, name]) => name.match(regex));
+}
+
+/** Only used for debugging/development atm. */
+function deleteWorkspaceSettingsByName(regex, dryrun=true) {
+    let out = ""
+    function rprint(...args) { print(...args); out += args.join(" ") + "\n"; }
+    let n = global.workspace_manager.get_n_workspaces();
+    for (let [uuid, s, name] of findWorkspaceSettingsByName(regex)) {
+        let index = s.get_int('index');
+        if (index < n) {
+            rprint("Skipping in-use settings", name, index);
+            continue;
+        }
+        rprint(dryrun ? "[dry]" : "", `Delete settings for '${name}' (${uuid})`);
+        if (!dryrun) {
+            deleteWorkspaceSettings(uuid);
+        }
+    }
+    return out;
+}
+
+/** Only used for debugging/development atm. */
 function deleteWorkspaceSettings(uuid) {
     // NB! Does not check if the settings is currently in use. Does not reindex subsequent settings.
     let list = workspaceList.get_strv('list');
@@ -150,7 +182,7 @@ function deleteWorkspaceSettings(uuid) {
     let settings = getWorkspaceSettingsByUUID(list[i]);
     for (let key of settings.list_keys()) {
         // Hopefully resetting all keys will delete the relocatable settings from dconf?
-        settings.reset();
+        settings.reset(key);
     }
 
     list.splice(i, 1);
@@ -258,7 +290,10 @@ var winprops = [];
 function winprop_match_p(meta_window, prop) {
     let wm_class = meta_window.wm_class || "";
     let title = meta_window.title;
-    if (prop.wm_class !== wm_class) {
+    if (prop.wm_class.constructor === RegExp) {
+        if (!wm_class.match(prop.wm_class))
+            return false;
+    } else if (prop.wm_class !== wm_class) {
         return false;
     }
     if (prop.title) {
